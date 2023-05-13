@@ -15,14 +15,16 @@
  * limitations under the License.
  */
 
+// Package conf is the configuration package for native client
 package conf
 
 import (
 	"fmt"
-	"strings"
-	"time"
+	"net"
+	"strconv"
 
 	"github.com/megaease/easeprobe/global"
+	"github.com/megaease/easeprobe/probe/base"
 )
 
 // Driver Interface
@@ -36,86 +38,101 @@ type DriverType int
 
 // The Driver Type of native client
 const (
-	MySQL DriverType = iota
+	Unknown DriverType = iota
+	MySQL
 	Redis
+	Memcache
 	Kafka
 	Mongo
 	PostgreSQL
 	Zookeeper
-	Unknown
 )
+
+// DriverMap is the map of [driver, name]
+var DriverMap = map[DriverType]string{
+	MySQL:      "mysql",
+	Redis:      "redis",
+	Memcache:   "memcache",
+	Kafka:      "kafka",
+	Mongo:      "mongo",
+	PostgreSQL: "postgres",
+	Zookeeper:  "zookeeper",
+	Unknown:    "unknown",
+}
 
 // Options implements the configuration for native client
 type Options struct {
-	Name       string     `yaml:"name"`
-	Host       string     `yaml:"host"`
-	DriverType DriverType `yaml:"driver"`
-	Username   string     `yaml:"username"`
-	Password   string     `yaml:"password"`
+	base.DefaultProbe `yaml:",inline"`
+
+	Host       string            `yaml:"host" json:"host" jsonschema:"required,format=hostname,title=Host,description=The host of the client,example=10.1.1.1:9000"`
+	DriverType DriverType        `yaml:"driver" json:"driver" jsonschema:"required,type=string,enum=mysql,enum=redis,enum=memcache,enum=kafka,enum=mongo,enum=postgres,enum=zookeeper,title=Driver,description=The driver of the client,example=mysql"`
+	Username   string            `yaml:"username,omitempty" json:"username,omitempty" jsonschema:"title=Username,description=The username of the client,example=root"`
+	Password   string            `yaml:"password,omitempty" json:"password,omitempty" jsonschema:"title=Password,description=The password of the client,example=123456"`
+	Data       map[string]string `yaml:"data,omitempty" json:"data,omitempty" jsonschema:"title=Data,description=The data of the client,example={\"key\":\"value\"}"`
 
 	//TLS
 	global.TLS `yaml:",inline"`
+}
 
-	//Control Option
-	Timeout      time.Duration `yaml:"timeout,omitempty"`
-	TimeInterval time.Duration `yaml:"interval,omitempty"`
+// Check do the configuration check
+func (d *Options) Check() error {
+	_, port, err := net.SplitHostPort(d.Host)
+	if err != nil {
+		return fmt.Errorf("Invalid Host: %s. %v", d.Host, err)
+	}
+	if p, err := strconv.Atoi(port); err != nil || p < 1 || p > 65535 {
+		return fmt.Errorf("Invalid Port: %s", port)
+	}
+	if d.DriverType == Unknown {
+		return fmt.Errorf("Unknown driver")
+	}
+	return nil
+}
+
+// DriverTypeMap is the map of driver [name, driver]
+var DriverTypeMap = reverseMap(DriverMap)
+
+func reverseMap(m map[DriverType]string) map[string]DriverType {
+	n := make(map[string]DriverType, len(m))
+	for k, v := range m {
+		n[v] = k
+	}
+	return n
 }
 
 // String convert the DriverType to string
 func (d DriverType) String() string {
-	switch d {
-	case MySQL:
-		return "MySQL"
-	case Redis:
-		return "Redis"
-	case Kafka:
-		return "Kafka"
-	case Mongo:
-		return "Mongo"
-	case PostgreSQL:
-		return "PostgreSQL"
-	case Zookeeper:
-		return "Zookeeper"
+	if val, ok := DriverMap[d]; ok {
+		return val
 	}
-	return "Unknown"
+	return DriverMap[Unknown]
 }
 
 // DriverType convert the string to DriverType
-func (d *DriverType) DriverType(driver string) DriverType {
-	switch driver {
-	case "mysql":
-		return MySQL
-	case "redis":
-		return Redis
-	case "kafka":
-		return Kafka
-	case "mongo":
-		return Mongo
-	case "postgres":
-		return PostgreSQL
-	case "zookeeper":
-		return Zookeeper
+func (d *DriverType) DriverType(name string) DriverType {
+	if val, ok := DriverTypeMap[name]; ok {
+		*d = val
+		return val
 	}
 	return Unknown
 }
 
+// MarshalYAML is marshal the driver type
+func (d DriverType) MarshalYAML() (interface{}, error) {
+	return global.EnumMarshalYaml(DriverMap, d, "Client Driver")
+}
+
 // UnmarshalYAML is unmarshal the driver type
 func (d *DriverType) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	var s string
-	if err := unmarshal(&s); err != nil {
-		return err
-	}
-	*d = d.DriverType(strings.ToLower(s))
-	return nil
+	return global.EnumUnmarshalYaml(unmarshal, DriverTypeMap, d, Unknown, "Client Driver")
+}
+
+// MarshalJSON is marshal the driver
+func (d DriverType) MarshalJSON() (b []byte, err error) {
+	return global.EnumMarshalJSON(DriverMap, d, "Client Driver")
 }
 
 // UnmarshalJSON is Unmarshal the driver type
 func (d *DriverType) UnmarshalJSON(b []byte) (err error) {
-	*d = d.DriverType(strings.ToLower(string(b)))
-	return nil
-}
-
-// MarshalJSON is marshal the driver
-func (d *DriverType) MarshalJSON() (b []byte, err error) {
-	return []byte(fmt.Sprintf(`"%s"`, d.String())), nil
+	return global.EnumUnmarshalJSON(b, DriverTypeMap, d, Unknown, "Client Driver")
 }

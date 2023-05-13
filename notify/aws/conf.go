@@ -15,33 +15,30 @@
  * limitations under the License.
  */
 
+// Package aws is the AWS notification package
 package aws
 
 import (
-	"time"
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/megaease/easeprobe/global"
+	"github.com/megaease/easeprobe/notify/base"
 )
 
 // Credentials is AWS access id and access token
 type Credentials struct {
-	ID     string `yaml:"id"`
-	Secret string `yaml:"key"`
+	ID     string `yaml:"id" json:"id" jsonschema:"required,title=AWS Access Key ID,description=AWS Access Key ID"`
+	Secret string `yaml:"key" json:"key" jsonschema:"required,title=AWS Access Key Secret,description=AWS Access Key Secret"`
 }
 
 // Options is AWS Configuration
 type Options struct {
-	Name        string        `yaml:"name"`
-	Region      string        `yaml:"region"`
-	Endpoint    string        `yaml:"endpoint"`
-	Credentials Credentials   `yaml:"credential"`
-	Profile     string        `yaml:"profile"`
-	Dry         bool          `yaml:"dry"`
-	Timeout     time.Duration `yaml:"timeout"`
-	Retry       global.Retry  `yaml:"retry"`
+	base.DefaultNotify `yaml:",inline"`
+	Region             string      `yaml:"region" json:"region" jsonschema:"required,title=AWS Region ID,description=AWS Region ID,example=\"us-west-2\""`
+	Endpoint           string      `yaml:"endpoint" json:"endpoint" jsonschema:"required,title=AWS Endpoint,description=AWS Endpoint,example=\"https://sns.us-west-2.amazonaws.com\""`
+	Credentials        Credentials `yaml:"credential" json:"credential" jsonschema:"required,title=AWS Credential,description=AWS Credential"`
+	Profile            string      `yaml:"profile,omitempty" json:"profile,omitempty" jsonschema:"title=AWS Profile,description=AWS Profile"`
 
 	session *session.Session `yaml:"-"`
 }
@@ -49,8 +46,7 @@ type Options struct {
 // Config config a AWS configuration
 func (conf *Options) Config(gConf global.NotifySettings) error {
 
-	conf.Timeout = gConf.NormalizeTimeOut(conf.Timeout)
-	conf.Retry = gConf.NormalizeRetry(conf.Retry)
+	conf.DefaultNotify.Config(gConf)
 
 	session, err := session.NewSessionWithOptions(
 		session.Options{

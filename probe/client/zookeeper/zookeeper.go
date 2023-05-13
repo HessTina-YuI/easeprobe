@@ -15,76 +15,92 @@
  * limitations under the License.
  */
 
+// Package zookeeper is the zookeeper client probe
 package zookeeper
 
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
+	"net"
+	"time"
+
 	"github.com/go-zookeeper/zk"
 	"github.com/megaease/easeprobe/probe/client/conf"
 	log "github.com/sirupsen/logrus"
-	"net"
-	"time"
 )
 
 // Kind is the type of driver
-const Kind string = "Zookeeper"
+const Kind string = "ZooKeeper"
 
 // Zookeeper is the Zookeeper client
 type Zookeeper struct {
 	conf.Options `yaml:",inline"`
-	tls          *tls.Config     `yaml:"-"`
-	Context      context.Context `yaml:"conn_str"`
+	tls          *tls.Config     `yaml:"-" json:"-"`
+	Context      context.Context `yaml:"conn_str,omitempty" json:"conn_str,omitempty"`
 }
 
-// New create a Redis client
-func New(opt conf.Options) Zookeeper {
+// New create a Zookeeper client
+func New(opt conf.Options) (*Zookeeper, error) {
 	tls, err := opt.TLS.Config()
 	if err != nil {
-		log.Errorf("[%s] %s - TLS Config error - %v", Kind, opt.Name, err)
+		log.Errorf("[%s / %s / %s] - TLS Config Error - %v", opt.ProbeKind, opt.ProbeName, opt.ProbeTag, err)
+		return nil, fmt.Errorf("TLS Config Error - %v", err)
 	}
 
-	return Zookeeper{
+	z := &Zookeeper{
 		Options: opt,
 		tls:     tls,
 		Context: context.Background(),
 	}
+
+	return z, nil
 }
 
 // Kind return the name of client
-func (z Zookeeper) Kind() string {
+func (z *Zookeeper) Kind() string {
 	return Kind
 }
 
 // Probe do the health check
-func (z Zookeeper) Probe() (bool, string) {
+func (z *Zookeeper) Probe() (bool, string) {
 	var (
 		conn *zk.Conn
 		err  error
 	)
 
-	if dialer := getDialer(z); dialer != nil {
-		conn, _, err = zk.Connect([]string{z.Host}, z.Timeout, zk.WithLogInfo(false), zk.WithDialer(dialer))
-	} else {
-		conn, _, err = zk.Connect([]string{z.Host}, z.Timeout, zk.WithLogInfo(false))
-	}
-
+	dialer := getDialer(z)
+	conn, _, err = zk.ConnectWithDialer([]string{z.Host}, z.Timeout(), dialer)
 	if err != nil {
 		return false, err.Error()
 	}
 	defer conn.Close()
 
-	_, _, err = conn.Get("/")
-	if err != nil {
-		return false, err.Error()
+	if len(z.Data) > 0 {
+		for path, val := range z.Data {
+			log.Debugf("[%s / %s / %s] - Verifying Data - Path = [%s], Value=[%s]", z.ProbeKind, z.ProbeName, z.ProbeTag, path, val)
+			v, _, err := conn.Get(path)
+			if err != nil {
+				return false, err.Error()
+			}
+			if string(v) != val {
+				return false, fmt.Sprintf("Data not match - Path = [%s], expected [%s] got [%s]", path, val, string(v))
+			}
+			log.Debugf("[%s / %s / %s] - Data Verified Successfully! Path = [%s], Value=[%s]", z.ProbeKind, z.ProbeName, z.ProbeTag, path, val)
+		}
+	} else {
+		_, _, err = conn.Get("/")
+		if err != nil {
+			return false, err.Error()
+		}
 	}
 
 	return true, "Check Zookeeper Server Successfully!"
 }
 
-func getDialer(z Zookeeper) func(network string, address string, _ time.Duration) (net.Conn, error) {
+func getDialer(z *Zookeeper) func(network string, address string, _ time.Duration) (net.Conn, error) {
 	if z.tls == nil {
-		return nil
+		return net.DialTimeout
 	}
 
 	return func(network, address string, _ time.Duration) (net.Conn, error) {
@@ -94,7 +110,7 @@ func getDialer(z Zookeeper) func(network string, address string, _ time.Duration
 			InsecureSkipVerify: true,
 		}
 
-		ipConn, err := net.DialTimeout(network, z.Host, z.Timeout)
+		ipConn, err := net.DialTimeout(network, z.Host, z.Timeout())
 		if err != nil {
 			return nil, err
 		}

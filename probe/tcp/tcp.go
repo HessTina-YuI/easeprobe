@@ -15,86 +15,51 @@
  * limitations under the License.
  */
 
+// Package tcp is the tcp probe package
 package tcp
 
 import (
 	"fmt"
 	"net"
-	"time"
 
 	"github.com/megaease/easeprobe/global"
-	"github.com/megaease/easeprobe/probe"
+	"github.com/megaease/easeprobe/probe/base"
 	log "github.com/sirupsen/logrus"
 )
 
-// Kind is the type
-const Kind string = "tcp"
-
 // TCP implements a config for TCP
 type TCP struct {
-	Name string `yaml:"name"`
-	Host string `yaml:"host"`
-
-	//Control Option
-	Timeout      time.Duration `yaml:"timeout,omitempty"`
-	TimeInterval time.Duration `yaml:"interval,omitempty"`
-
-	result *probe.Result `yaml:"-"`
-}
-
-// Kind return the HTTP kind
-func (t *TCP) Kind() string {
-	return Kind
-}
-
-// Interval get the interval
-func (t *TCP) Interval() time.Duration {
-	return t.TimeInterval
-}
-
-// Result get the probe result
-func (t *TCP) Result() *probe.Result {
-	return t.result
+	base.DefaultProbe `yaml:",inline"`
+	Host              string `yaml:"host" json:"host" jsonschema:"required,format=hostname,title=Host,description=The host to probe"`
+	Proxy             string `yaml:"proxy" json:"proxy,omitempty" jsonschema:"format=hostname,title=Proxy,description=The proxy to use"`
 }
 
 // Config HTTP Config Object
 func (t *TCP) Config(gConf global.ProbeSettings) error {
+	kind := "tcp"
+	tag := ""
+	name := t.ProbeName
+	t.DefaultProbe.Config(gConf, kind, tag, name, t.Host, t.DoProbe)
 
-	t.Timeout = gConf.NormalizeTimeOut(t.Timeout)
-	t.TimeInterval = gConf.NormalizeInterval(t.TimeInterval)
-
-	t.result = probe.NewResult()
-	t.result.Endpoint = t.Host
-	t.result.Name = t.Name
-	t.result.PreStatus = probe.StatusInit
-	t.result.TimeFormat = gConf.TimeFormat
-
-	log.Debugf("[%s] configuration: %+v, %+v", t.Kind(), t, t.Result())
+	log.Debugf("[%s / %s] configuration: %+v", t.ProbeKind, t.ProbeName, *t)
 	return nil
 }
 
-// Probe return the checking result
-func (t *TCP) Probe() probe.Result {
-
-	now := time.Now()
-	t.result.StartTime = now
-	t.result.StartTimestamp = now.UnixMilli()
-
-	conn, err := net.DialTimeout("tcp", t.Host, t.Timeout)
-	t.result.RoundTripTime.Duration = time.Since(now)
-	status := probe.StatusUp
+// DoProbe return the checking result
+func (t *TCP) DoProbe() (bool, string) {
+	conn, err := t.GetProxyConnection(t.Proxy, t.Host)
+	status := true
+	message := ""
 	if err != nil {
-		t.result.Message = fmt.Sprintf("Error: %v", err)
-		log.Errorf("error: %v", err)
-		status = probe.StatusDown
+		message = fmt.Sprintf("Error: %v", err)
+		log.Errorf("[%s / %s] error: %v", t.ProbeKind, t.ProbeName, err)
+		status = false
 	} else {
-		t.result.Message = "TCP Connection Established Successfully!"
-		conn.Close()
+		message = "TCP Connection Established Successfully!"
+		if tcpCon, ok := conn.(*net.TCPConn); ok {
+			tcpCon.SetLinger(0)
+		}
+		defer conn.Close()
 	}
-	t.result.PreStatus = t.result.Status
-	t.result.Status = status
-
-	t.result.DoStat(t.TimeInterval)
-
-	return *t.result
+	return status, message
 }

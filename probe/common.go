@@ -19,86 +19,92 @@ package probe
 
 import (
 	"fmt"
-	"time"
-
-	log "github.com/sirupsen/logrus"
+	"regexp"
+	"strings"
 )
 
-// DurationStr convert the curation to string
-func DurationStr(d time.Duration) string {
+// TextChecker is the struct to check the output
+type TextChecker struct {
+	Contain    string `yaml:"contain,omitempty" json:"contain,omitempty" jsonschema:"title=Contain Text,description=the string must be contained"`
+	NotContain string `yaml:"not_contain,omitempty" json:"not_contain,omitempty" jsonschema:"title=Not Contain Text,description=the string must not be contained"`
+	RegExp     bool   `yaml:"regex,omitempty" json:"regex,omitempty" jsonschema:"title=regex,description=use regular expression to check the contain or not contain"`
 
-	const day = time.Minute * 60 * 24
-
-	if d < 0 {
-		d *= -1
-	}
-
-	if d < day {
-		return d.String()
-	}
-
-	n := d / day
-	d -= n * day
-
-	if d == 0 {
-		return fmt.Sprintf("%dd", n)
-	}
-
-	return fmt.Sprintf("%dd%s", n, d)
+	containReg    *regexp.Regexp `yaml:"-" json:"-"`
+	notContainReg *regexp.Regexp `yaml:"-" json:"-"`
 }
 
-// HTMLHeader return the HTML head
-func HTMLHeader(title string) string {
-	return `
-	<html>
-	<head>
-		<style>
-		 .head {
-			background: #2442bf;
-			font-weight: 900;
-			color: #fff;
-			padding: 6px 12px;
-		 }
-		 .head a:link, .head a:visited {
-			color: #ff9;
-			text-decoration: none;
-		  }
-		  
-		  .head a:hover, .head a:active {
-			text-decoration: underline;
-		  }
-		 .data {
-			background: #f6f6f6;
-			padding: 6px 12px;
-			color: #3b3b3b;
-		 }
-		 .right{
-			text-align: right;
-		 }
-		 .center{
-			text-align: center;
-		 }
-		</style>
-	</head>
-	<body style="font-family: Montserrat, sans-serif;">
-		<h1 style="font-weight: normal; letter-spacing: -1px;color: #3b3b3b;">` + title + `</h1>`
+// Config the text checker initialize the regexp
+func (tc *TextChecker) Config() (err error) {
+	if !tc.RegExp {
+		return nil
+	}
+
+	if len(tc.Contain) == 0 {
+		tc.containReg = nil
+	} else if tc.containReg, err = regexp.Compile(tc.Contain); err != nil {
+		tc.containReg = nil
+		return err
+	}
+
+	if len(tc.NotContain) == 0 {
+		tc.notContainReg = nil
+	} else if tc.notContainReg, err = regexp.Compile(tc.NotContain); err != nil {
+		tc.notContainReg = nil
+		return err
+	}
+
+	return nil
 }
 
-// HTMLFooter return the HTML footer
-func HTMLFooter() string {
-	return `
-	</body>
-	</html>`
+// Check the text
+func (tc *TextChecker) Check(Text string) error {
+	if tc.RegExp {
+		return tc.CheckRegExp(Text)
+	}
+	return tc.CheckText(Text)
 }
 
-// LogSend is helper function to log the send logs.
-func LogSend(kind, name, tag, message string, err error) {
-	if len(message) <= 0 {
-		message = " " + message + " "
+func (tc *TextChecker) String() string {
+	if tc.RegExp {
+		return fmt.Sprintf("RegExp Mode - Contain:[%s], NotContain:[%s]", tc.Contain, tc.NotContain)
 	}
-	if err != nil {
-		log.Errorf("[%s / %s / %s] - failed to send!%s(%v)", kind, name, tag, message, err)
-	} else {
-		log.Infof("[%s / %s / %s] - successfully sent!%s", kind, name, tag, message)
+	return fmt.Sprintf("Text Mode - Contain:[%s], NotContain:[%s]", tc.Contain, tc.NotContain)
+}
+
+// CheckText checks the output text,
+// - if it contains a configured string then return nil
+// - if it does not contain a configured string then return nil
+func (tc *TextChecker) CheckText(Output string) error {
+
+	if len(tc.Contain) > 0 && !strings.Contains(Output, tc.Contain) {
+		return fmt.Errorf("the output does not contain [%s]", tc.Contain)
 	}
+
+	if len(tc.NotContain) > 0 && strings.Contains(Output, tc.NotContain) {
+		return fmt.Errorf("the output contains [%s]", tc.NotContain)
+	}
+	return nil
+}
+
+// CheckRegExp checks the output text,
+// - if it contains a configured pattern then return nil
+// - if it does not contain a configured pattern then return nil
+func (tc *TextChecker) CheckRegExp(Output string) error {
+
+	if len(tc.Contain) > 0 && tc.containReg != nil && !tc.containReg.MatchString(Output) {
+		return fmt.Errorf("the output does not match the pattern [%s]", tc.Contain)
+	}
+
+	if len(tc.NotContain) > 0 && tc.notContainReg != nil && tc.notContainReg.MatchString(Output) {
+		return fmt.Errorf("the output match the pattern [%s]", tc.NotContain)
+	}
+	return nil
+}
+
+// CheckEmpty return "empty" if the string is empty
+func CheckEmpty(s string) string {
+	if len(strings.TrimSpace(s)) <= 0 {
+		return "empty"
+	}
+	return s
 }

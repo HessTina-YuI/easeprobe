@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+// Package slack is the slack notification package.
 package slack
 
 import (
@@ -22,81 +23,32 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"time"
 
 	"github.com/megaease/easeprobe/global"
-	"github.com/megaease/easeprobe/probe"
+	"github.com/megaease/easeprobe/notify/base"
+	"github.com/megaease/easeprobe/report"
 	log "github.com/sirupsen/logrus"
 )
 
 // NotifyConfig is the slack notification configuration
 type NotifyConfig struct {
-	Name       string        `yaml:"name"`
-	WebhookURL string        `yaml:"webhook"`
-	Dry        bool          `yaml:"dry"`
-	Timeout    time.Duration `yaml:"timeout"`
-	Retry      global.Retry  `yaml:"retry"`
-}
-
-// Kind return the type of Notify
-func (c *NotifyConfig) Kind() string {
-	return "slack"
+	base.DefaultNotify `yaml:",inline"`
+	WebhookURL         string `yaml:"webhook" json:"webhook" jsonschema:"required,format=uri,title=Webhook URL,description=The Slack webhook URL"`
 }
 
 // Config configures the slack notification
 func (c *NotifyConfig) Config(gConf global.NotifySettings) error {
-	if c.Dry {
-		log.Infof("Notification [%s] - [%s]  is running on Dry mode!", c.Kind(), c.Name)
-	}
-
-	c.Timeout = gConf.NormalizeTimeOut(c.Timeout)
-	c.Retry = gConf.NormalizeRetry(c.Retry)
-
-	log.Infof("[%s] configuration: %+v", c.Kind(), c)
+	c.NotifyKind = "slack"
+	c.NotifyFormat = report.Slack
+	c.NotifySendFunc = c.SendSlack
+	c.DefaultNotify.Config(gConf)
+	log.Debugf("Notification [%s] - [%s] configuration: %+v", c.NotifyKind, c.NotifyName, c)
 	return nil
 }
 
-// Notify write the message into the slack
-func (c *NotifyConfig) Notify(result probe.Result) {
-	if c.Dry {
-		c.DryNotify(result)
-		return
-	}
-	json := result.SlackBlockJSON()
-	c.SendSlackNotificationWithRetry("Notification", json)
-}
-
-// NotifyStat write the all probe stat message to slack
-func (c *NotifyConfig) NotifyStat(probers []probe.Prober) {
-	if c.Dry {
-		c.DryNotifyStat(probers)
-		return
-	}
-	json := probe.StatSlackBlockJSON(probers)
-	c.SendSlackNotificationWithRetry("SLA", json)
-
-}
-
-// DryNotify just log the notification message
-func (c *NotifyConfig) DryNotify(result probe.Result) {
-	log.Infof("[%s / %s] - %s", c.Kind(), c.Name, result.SlackBlockJSON())
-}
-
-// DryNotifyStat just log the notification message
-func (c *NotifyConfig) DryNotifyStat(probers []probe.Prober) {
-	log.Infof("[%s / %s] - %s", c.Kind(), c.Name, probe.StatSlackBlockJSON(probers))
-}
-
-// SendSlackNotificationWithRetry send the Slack notification with retry
-func (c *NotifyConfig) SendSlackNotificationWithRetry(tag string, msg string) {
-
-	fn := func() error {
-		log.Debugf("[%s - %s] - %s", c.Kind(), tag, msg)
-		return c.SendSlackNotification(msg)
-	}
-
-	err := global.DoRetry(c.Kind(), c.Name, tag, c.Retry, fn)
-	probe.LogSend(c.Kind(), c.Name, tag, "", err)
+// SendSlack is the wrapper for SendSlackNotification
+func (c *NotifyConfig) SendSlack(title, msg string) error {
+	return c.SendSlackNotification(msg)
 }
 
 // SendSlackNotification will post to an 'Incoming Webhook' url setup in Slack Apps. It accepts
@@ -110,7 +62,7 @@ func (c *NotifyConfig) SendSlackNotification(msg string) error {
 	req.Header.Add("Content-Type", "application/json")
 	req.Close = true
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: c.Timeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -123,7 +75,8 @@ func (c *NotifyConfig) SendSlackNotification(msg string) error {
 		return err
 	}
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("Error response from Slack [%d] - [%s]", resp.StatusCode, string(buf))
+		log.Debugf(msg)
+		return fmt.Errorf("Error response from Slack - code [%d] - msg [%s]", resp.StatusCode, string(buf))
 	}
 	// if buf.String() != "ok" {
 	// 	return errors.New("Non-ok response returned from Slack " + buf.String())

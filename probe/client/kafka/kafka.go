@@ -15,11 +15,13 @@
  * limitations under the License.
  */
 
+// Package kafka is the native client probe for kafka.
 package kafka
 
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 
 	"github.com/megaease/easeprobe/probe/client/conf"
 	"github.com/segmentio/kafka-go"
@@ -33,36 +35,38 @@ const Kind string = "Kafka"
 // Kafka is the Kafka client
 type Kafka struct {
 	conf.Options `yaml:",inline"`
-	tls          *tls.Config     `yaml:"-"`
-	Context      context.Context `yaml:"-"`
+	tls          *tls.Config     `yaml:"-" json:"-"`
+	Context      context.Context `yaml:"-" json:"-"`
 }
 
-// New create a Redis client
-func New(opt conf.Options) Kafka {
+// New create a Kafka client
+func New(opt conf.Options) (*Kafka, error) {
 	tls, err := opt.TLS.Config()
 	if err != nil {
-		log.Errorf("[%s] %s - TLS Config error - %v", Kind, opt.Name, err)
+		log.Errorf("[%s / %s / %s] - TLS Config Error - %v", opt.ProbeKind, opt.ProbeName, opt.ProbeTag, err)
+		return nil, fmt.Errorf("TLS Config Error - %v", err)
 	}
-	return Kafka{
+	k := &Kafka{
 		Options: opt,
 		tls:     tls,
 		Context: context.Background(),
 	}
+	return k, nil
 }
 
 // Kind return the name of client
-func (k Kafka) Kind() string {
+func (k *Kafka) Kind() string {
 	return Kind
 }
 
 // Probe do the health check
-func (k Kafka) Probe() (bool, string) {
+func (k *Kafka) Probe() (bool, string) {
 
 	var dialer *kafka.Dialer
 
 	if len(k.Password) > 0 {
 		dialer = &kafka.Dialer{
-			Timeout: k.Timeout,
+			Timeout: k.Timeout(),
 			TLS:     k.tls,
 			SASLMechanism: plain.Mechanism{
 				Username: k.Username,
@@ -71,13 +75,13 @@ func (k Kafka) Probe() (bool, string) {
 		}
 	} else {
 		dialer = &kafka.Dialer{
-			Timeout:       k.Timeout,
+			Timeout:       k.Timeout(),
 			TLS:           k.tls,
 			SASLMechanism: nil,
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(k.Context, k.Timeout)
+	ctx, cancel := context.WithTimeout(k.Context, k.Timeout())
 	defer cancel()
 
 	conn, err := dialer.DialContext(ctx, "tcp", k.Host)
@@ -99,7 +103,7 @@ func (k Kafka) Probe() (bool, string) {
 		m[p.Topic] = struct{}{}
 	}
 	for t := range m {
-		log.Debugf("[%s] Topic Name - %s", k.Kind(), t)
+		log.Debugf("[%s / %s / %s] Topic Name - %s", k.ProbeKind, k.ProbeName, k.ProbeTag, t)
 	}
 
 	return true, "Check Kafka Server Successfully!"

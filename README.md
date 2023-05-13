@@ -1,450 +1,174 @@
-# EaseProbe
+<h1>EaseProbe</h1>
 
-EaseProbe is a simple, standalone, and lightWeight tool that can do health/status checking, written in Go.
-
-- [EaseProbe](#easeprobe)
-  - [1. Overview](#1-overview)
-    - [1.1 Probe](#11-probe)
-    - [1.2 Notification](#12-notification)
-    - [1.3 Report](#13-report)
-  - [2. Getting Start](#2-getting-start)
-    - [2.1 Build](#21-build)
-    - [2.2 Run](#22-run)
-  - [3. Configuration](#3-configuration)
-    - [3.1 HTTP Probe Configuration](#31-http-probe-configuration)
-    - [3.2 TCP Probe Configuration](#32-tcp-probe-configuration)
-    - [3.3 Shell Command Probe Configuration](#33-shell-command-probe-configuration)
-    - [3.4 Native Client Probe](#34-native-client-probe)
-    - [3.5 Notification Configuration](#35-notification-configuration)
-    - [3.6 Global Setting Configuration](#36-global-setting-configuration)
-  - [4. Community](#4-community)
-  - [5. License](#5-license)
-
-## 1. Overview
-
-EaseProbe would do 3 kinds of work - **Probe**, **Notify**, and **Report**.
-
-### 1.1 Probe
-
-Ease Probe supports the following probing methods:
-
-- **HTTP**. Checking the HTTP status code, Support mTLS, HTTP Basic Auth, and can set the Request Header/Body. ( [HTTP Probe Configuration](#31-http-probe-configuration) )
-
-  ```YAML
-  http:
-    # Some of the Software support the HTTP Query
-    - name: ElasticSearch
-      url: http://elasticsearch.server:9200
-    - name: Prometheus
-      url: http://prometheus:9090/graph
-  ```
-
-- **TCP**. Just simply check the TCP connection can be established or not. ( [TCP Probe Configuration](#32-tcp-probe-configuration) )
-
-  ```YAML
-  tcp:
-    - name: Kafka
-      host: kafka.server:9093
-  ```
-
-- **Shell**. Run a Shell command and check the result. ( [Shell Command Probe Configuration](#33-shell-command-probe-configuration) )
-
-  ```YAML
-  shell:
-    # run redis-cli ping and check the "PONG"
-    - name: Redis (Local)
-      cmd: "redis-cli"
-      args:
-        - "-h"
-        - "127.0.0.1"
-        - "ping"
-      env:
-        # set the `REDISCLI_AUTH` environment variable for redis password
-        - "REDISCLI_AUTH=abc123"
-      # check the command output, if does not contain the PONG, mark the status down
-      contain : "PONG"
-  ```
-
-- **Client**. Currently, support the following native client. Support the mTLS. ( [Native Client Probe](#34-native-client-probe) )
-  - **MySQL**. Connect to the MySQL server and run the `SHOW STATUS` SQL.
-  - **Redis**. Connect to the Redis server and run the `PING` command.
-  - **MongoDB**. Connect to MongoDB server and just ping server.
-  - **Kafka**. Connect to Kafka server and list all topics.
-  - **PostgreSQL**. Connect to PostgreSQL server and run `SELECT 1` SQL.
-  - **Zookeeper**. Connect to Zookeeper server and run `get /` command.
-
-  ```YAML
-  client:
-    - name: Kafka Native Client (local)
-      driver: "kafka"
-      host: "localhost:9093"
-      # mTLS
-      ca: /path/to/file.ca
-      cert: /path/to/file.crt
-      key: /path/to/file.key
-  ```
+[![Go Report Card](https://goreportcard.com/badge/github.com/megaease/easeprobe)](https://goreportcard.com/report/github.com/megaease/easeprobe)
+[![codecov](https://codecov.io/gh/megaease/easeprobe/branch/main/graph/badge.svg?token=L7SR8X6SRN)](https://codecov.io/gh/megaease/easeprobe)
+[![Build](https://github.com/megaease/easeprobe/actions/workflows/test.yaml/badge.svg)](https://github.com/megaease/easeprobe/actions/workflows/test.yaml)
+[![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/megaease/easeprobe)](https://github.com/megaease/easeprobe/blob/main/go.mod)
+[![Join MegaEase Slack](https://img.shields.io/badge/slack-megaease-brightgreen?logo=slack)](https://join.slack.com/t/openmegaease/shared_invite/zt-upo7v306-lYPHvVwKnvwlqR0Zl2vveA)
 
 
-### 1.2 Notification
+EaseProbe is a simple, standalone, and lightweight tool that can do health/status checking, written in Go.
 
-Ease Probe supports the following notifications:
+![](docs/overview.png)
 
-- **Slack**. Using Webhook for notification
-- **Discord**. Using Webhook for notification
-- **Telegram**. Using Telegram Bot for notification
-- **Email**. Support multiple email addresses.
-- **AWS SNS**. Support AWS Simple Notification Service.
-- **Log File**. Write the notification into a log file
+<h2>Table of Contents</h2>
 
-**Note**:
-
-- The notification is **Edge-Triggered Mode**, only notified while the status is changed.
-
-```YAML
-# Notification Configuration
-notify:
-  slack:
-    - name: "MegaEase#Alter"
-      webhook: "https://hooks.slack.com/services/........../....../....../"
-  discord:
-    - name: "MegaEase#Alter"
-      webhook: "https://discord.com/api/webhooks/...../....../"
-  telegram:
-    - name: "MegaEase Alter Group"
-      token: 1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ # Bot Token
-      chat_id: -123456789 # Channel / Group ID
-  email:
-    - name: "DevOps Mailing List"
-      server: smtp.email.example.com:465
-      username: user@example.com
-      password: ********
-      to: "user1@example.com;user2@example.com"
-  aws_sns:
-    - name: AWS SNS
-      region: us-west-2
-      arn: arn:aws:sns:us-west-2:298305261856:xxxxx
-      endpoint: https://sns.us-west-2.amazonaws.com
-      credential:
-        id: AWSXXXXXXXID
-        key: XXXXXXXX/YYYYYYY
-```
-
-Check the  [Notification Configuration](#35-notification-configuration) to see how to configure it.
-
-### 1.3 Report
-
-- **SLA Report**. EaseProbe would send the daily, weekly, or monthly SLA report.
-
-```YAML
-settings:
-  # SLA Report schedule
-  sla:
-    #  daily, weekly (Sunday), monthly (Last Day), none
-    schedule: "weekly"
-    # UTC time, the format is 'hour:min:sec'
-    time: "23:59"
-```
+- [1. Introduction](#1-introduction)
+  - [1.1 Probe](#11-probe)
+  - [1.2 Notification](#12-notification)
+  - [1.3 Report \& Metrics](#13-report--metrics)
+- [2. Getting Started](#2-getting-started)
+  - [2.1 Build](#21-build)
+  - [2.2 Configure](#22-configure)
+  - [2.3 Run](#23-run)
+- [3. Deployment](#3-deployment)
+- [4. User Manual](#4-user-manual)
+- [5. Benchmark](#5-benchmark)
+- [6. Contributing](#6-contributing)
+- [7. Community](#7-community)
+- [8. License](#8-license)
 
 
-## 2. Getting Start
+# 1. Introduction
 
-### 2.1 Build
+EaseProbe is designed to do three kinds of work - **Probe**, **Notify**, and **Report**.
 
-Compiler `Go 1.17+`
+## 1.1 Probe
 
-Use `make` to make the binary file. the target is under the `build/bin` directory
+EaseProbe supports a variety of methods to perform its probes such as:
+
+- **HTTP**. Checking the HTTP status code, Support mTLS, HTTP Basic Auth, setting Request Header/Body, and XPath response evaluation. ( [HTTP Probe Manual](./docs/Manual.md#12-http) )
+- **TCP**. Check whether a TCP connection can be established or not. ( [TCP Probe Manual](./docs/Manual.md#13-tcp) )
+- **Ping**. Ping a host to see if it is reachable or not. ( [Ping Probe Manual](./docs/Manual.md#14-ping) )
+- **Shell**. Run a Shell command and check the result. ( [Shell Command Probe Manual](./docs/Manual.md#15-shell) )
+- **SSH**. Run a remote command via SSH and check the result. Support the bastion/jump server ([SSH Command Probe Manual](./docs/Manual.md#16-ssh))
+- **TLS**. Connect to a given port using TLS and (optionally) validate for revoked or expired certificates ( [TLS Probe Manual](./docs/Manual.md#17-tls) )
+- **Host**. Run an SSH command on a remote host and check the CPU, Memory, and Disk usage. ( [Host Load Probe Manual](./docs/Manual.md#18-host) )
+- **Client**. The following native clients are supported. They all support mTLS and data checking. ( [Native Client Probe Manual](./docs/Manual.md#19-native-client) )
+  - **MySQL**. Connect to a MySQL server and run the `SHOW STATUS` SQL.
+  - **Redis**. Connect to a Redis server and run the `PING` command.
+  - **Memcache**. Connect to a Memcache server and run the `version` command or validate a given key/value pair.
+  - **MongoDB**. Connect to a MongoDB server and perform a ping.
+  - **Kafka**. Connect to a Kafka server and perform a list of all topics.
+  - **PostgreSQL**. Connect to a PostgreSQL server and run `SELECT 1` SQL.
+  - **Zookeeper**. Connect to a Zookeeper server and run `get /` command.
+
+## 1.2 Notification
+
+EaseProbe supports notification delivery to the following:
+
+- **Slack**. Using Slack Webhook for notification delivery
+- **Discord**. Using Discord Webhook for notification delivery
+- **Telegram**. Using Telegram Bot for notification delivery
+- **Teams**. Support the [Microsoft Teams](https://docs.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/connectors-using?tabs=cURL#setting-up-a-custom-incoming-webhook) notification delivery
+- **Email**. Support email notification delivery to one or more email addresses
+- **AWS SNS**. Support the AWS Simple Notification Service
+- **WeChat Work**. Support Enterprise WeChat Work notification delivery
+- **DingTalk**. Support the DingTalk notification delivery
+- **Lark**. Support the Lark(Feishu) notification delivery
+- **SMS**. SMS notification delivery with support for multiple SMS service providers
+  - [Twilio](https://www.twilio.com/sms)
+  - [Vonage(Nexmo)](https://developer.vonage.com/messaging/sms/overview)
+  - [YunPain](https://www.yunpian.com/doc/en/domestic/list.html)
+- **Log**. Write the notification into a log file or Syslog.
+- **Shell**. Run a shell command to deliver the notification (see [example](resources/scripts/notify/notify.sh))
+- **RingCentral**. Using RingCentral Webhook for notification delivery
+
+> **Note**:
+>
+> 1) The notification is **Edge-Triggered Mode** by default, if you want to config it as **Level-Triggered Mode** with different interval and max notification, please refer to the manual - [Alerting Interval](./docs/Manual.md#112-alerting-interval).
+>
+> 2) Windows platforms do not support syslog as notification method.
+
+Check the [Notification Manual](./docs/Manual.md#2-notification) to see how to configure it.
+
+## 1.3 Report & Metrics
+
+EaseProbe supports the following report and metrics:
+
+- **SLA Report Notify**. EaseProbe would send the daily, weekly, or monthly SLA report using the defined **`notify:`** methods.
+- **SLA Live Report**. The EaseProbe would listen on the `0.0.0.0:8181` port by default. By accessing this service you will be provided with a live SLA report either as HTML at `http://localhost:8181/` or as JSON at `http://localhost:8181/api/v1/sla`
+- **SLA Data Persistence**. The SLA data will be persisted in `$CWD/data/data.yaml` by default. You can configure this path by editing the `settings` section of your configuration file.
+
+For more information, please check the [Global Setting Configuration](./docs/Manual.md#73-global-setting-configuration)
+
+- **Prometheus Metrics**. The EaseProbe would listen on the `8181` port by default. By accessing this service you will be provided with Prometheus metrics at `http://easeprobe:8181/metrics`.
+
+The metrics are prefixed with `easeprobe_` and are documented in [Prometheus Metrics Exporter](./docs/Manual.md#6-prometheus-metrics-exporter)
+
+# 2. Getting Started
+
+You can get started with EaseProbe, by any of the following methods:
+* Download the release for your platform from https://github.com/megaease/easeprobe/releases
+* Use the available EaseProbe docker image `docker run -it megaease/easeprobe`
+* Build `easeprobe` from sources
+
+## 2.1 Build
+
+Compiler `Go 1.20+` (Generics Programming Support), checking the [Go Installation](https://go.dev/doc/install) to see how to install Go on your platform.
+
+Use `make` to build and produce the `easeprobe` binary file. The executable is produced under the `build/bin` directory.
 
 ```shell
 $ make
 ```
+## 2.2 Configure
 
-### 2.2 Run
+Read the [User Manual](./docs/Manual.md) for detailed instructions on how to configure all EaseProbe parameters.
 
-Running the following command for local test
+Create a configuration file (eg. `$CWD/config.yaml`) using the configuration template at [./resources/config.yaml](https://raw.githubusercontent.com/megaease/easeprobe/main/resources/config.yaml), which includes the complete list of configuration parameters.
+
+The following simple configuration example can be used to get started:
+
+```YAML
+http: # http probes
+  - name: EaseProbe Github
+    url: https://github.com/megaease/easeprobe
+notify:
+  log:
+    - name: log file # local log file
+      file: /var/log/easeprobe.log
+settings:
+  probe:
+    timeout: 30s # the time out for all probes
+    interval: 1m # probe every minute for all probes
+```
+
+You can check the [EaseProbe JSON Schema](./docs/Manual.md#81-easeprobe-json-schema) section to use a JSON Scheme file to make your life easier when you edit the configuration file.
+
+## 2.3 Run
+
+You can run the following command to start EaseProbe once built
 
 ```shell
 $ build/bin/easeprobe -f config.yaml
 ```
+* `-f` configuration file or URL or path for multiple files which will be automatically merged into one. Can also be achieved by setting the environment variable `PROBE_CONFIG`
+* `-d` dry run. Can also be achieved by setting the environment variable `PROBE_DRY`
 
+# 3. Deployment
 
-## 3. Configuration
+EaseProbe can be deployed by Systemd, Docker, Docker-Compose, & Kubernetes.
 
-The following configuration is an example.
+You can find the details in [Deployment Guide](./docs/Deployment.md)
 
-### 3.1 HTTP Probe Configuration
+# 4. User Manual
 
-```YAML
-# HTTP Probe Configuration
+For detailed instructions and features please refer to the [User Manual](./docs/Manual.md)
 
-http:
-  # A Website
-  - name: MegaEase Website (Global)
-    url: https://megaease.com
+# 5. Benchmark
 
-  # Some of the Software support the HTTP Query
-  - name: ElasticSearch
-    url: http://elasticsearch.server:9200
-  - name: Eureka
-    url: http://eureka.server:8761
-  - name: Prometheus
-    url: http://prometheus:9090/graph
+We have performed an extensive benchmark on EaseProbe. For the benchmark results please refer to - [Benchmark Report](./docs/Benchmark.md)
 
-  # Spring Boot Application with Actuator Heath API
-  - name: EaseService-Governance
-    url: http://easeservice-mgmt-governance:38012/actuator/health
-  - name: EaseService-Control
-    url: http://easeservice-mgmt-control:38013/actuator/health
-  - name: EaseService-Mesh
-    url: http://easeservice-mgmt-mesh:38013/actuator/health
+# 6. Contributing
 
-  # A completed HTTP Probe configuration
-  - name: Special Website
-    url: https://megaease.cn
-    # Request Method
-    method: GET
-    # Request Header
-    headers:
-      X-head-one: xxxxxx
-      X-head-two: yyyyyy
-      X-head-THREE: zzzzzzX-
-    content_encoding: text/json
-    # Request Body
-    body: '{ "FirstName": "Mega", "LastName" : "Ease", "UserName" : "megaease", "Email" : "user@example.com"}'
-    # HTTP Basic Auth
-    username: username
-    password: password
-    # mTLS
-    ca: /path/to/file.ca
-    cert: /path/to/file.crt
-    key: /path/to/file.key
-    # configuration
-    timeout: 10s # default is 30 seconds
-    interval: 60s # default is 60 seconds
+If you're interested in contributing to the project, please spare a moment to read our [CONTRIBUTING Guide](./docs/CONTRIBUTING.md)
 
-```
-### 3.2 TCP Probe Configuration
+# 7. Community
 
-```YAML
-# TCP Probe Configuration
-tcp:
-  - name: SSH Service
-    host: example.com:22
-    timeout: 10s # default is 30 seconds
-    interval: 2m # default is 60 seconds
-
-  - name: Kafka
-    host: kafka.server:9093
-```
-
-### 3.3 Shell Command Probe Configuration
-
-```YAML
-# Shell Probe Configuration
-shell:
-  # A proxy curl shell script
-  - name: Google Service
-    cmd: "./resources/probe/scripts/proxy.curl.sh"
-    args:
-      - "socks5://127.0.0.1:1085"
-      - "www.google.com"
-
-  # run redis-cli ping and check the "PONG"
-  - name: Redis (Local)
-    cmd: "redis-cli"
-    args:
-      - "-h"
-      - "127.0.0.1"
-      - "ping"
-    env:
-      # set the `REDISCLI_AUTH` environment variable for redis password
-      - "REDISCLI_AUTH=abc123"
-    # check the command output, if does not contain the PONG, mark the status down
-    contain : "PONG"
-
-  # Run Zookeeper command `stat` to check the zookeeper status
-  - name: Zookeeper (Local)
-    cmd: "/bin/sh"
-    args:
-      - "-c"
-      - "echo stat | nc 127.0.0.1 2181"
-    contain: "Mode:"
-```
-
-### 3.4 Native Client Probe
-
-```YAML
-# Native Client Probe
-client:
-  - name: Redis Native Client (local)
-    driver: "redis"  # driver is redis
-    host: "localhost:6379"  # server and port
-    password: "abc123" # password
-    # mTLS
-    ca: /path/to/file.ca
-    cert: /path/to/file.crt
-    key: /path/to/file.key
-
-  - name: MySQL Native Client (local)
-    driver: "mysql"
-    host: "localhost:3306"
-    username: "root"
-    password: "pass"
-
-  - name: MongoDB Native Client (local)
-    driver: "mongo"
-    host: "localhost:27017"
-    username: "admin"
-    password: "abc123"
-    timeout: 5s
-
-  - name: Kafka Native Client (local)
-    driver: "kafka"
-    host: "localhost:9093"
-    # mTLS
-    ca: /path/to/file.ca
-    cert: /path/to/file.crt
-    key: /path/to/file.key
-
-  - name: PostgreSQL Native Client (local)
-    driver: "postgres"
-    host: "localhost:5432"
-    username: "postgres"
-    password: "pass"
-
-  - name: Zookeeper Native Client (local)
-    driver: "zookeeper"
-    host: "localhost:2181"
-    timeout: 5s
-    # mTLS
-    ca: /path/to/file.ca
-    cert: /path/to/file.crt
-    key: /path/to/file.key
-```
-
-
-### 3.5 Notification Configuration
-
-```YAML
-# Notification Configuration
-notify:
-  # Notify to Slack Channel
-  slack:
-    - name: "Organization #Alter"
-      webhook: "https://hooks.slack.com/services/........../....../....../"
-      # dry: true   # dry notification, print the Slack JSON in log(STDOUT)
-  telegram:
-    - name: "Group Name"
-      token: 1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ # Bot Token
-      chat_id: -123456789 # Group ID
-    - name: "Channel Name"
-      token: 1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ # Bot Token
-      chat_id: -1001234567890 # Channel ID
-  # Notify to Discord Text Channel
-  discord:
-    - name: "Server #Alter"
-      webhook: "https://discord.com/api/webhooks/...../....../"
-      # the avatar and thumbnail setting for notify block
-      avatar: "https://img.icons8.com/ios/72/appointment-reminders--v1.png"
-      thumbnail: "https://freeiconshop.com/wp-content/uploads/edd/notification-flat.png"
-      # dry: true # dry notification, print the Discord JSON in log(STDOUT)
-      retry: # something the network is not good need to retry.
-        times: 3
-        interval: 10s
-  # Notify to email addresses
-  email:
-    - name: "XXX Mail List"
-      server: smtp.email.example.com:465
-      username: user@example.com
-      password: ********
-      to: "user1@example.com;user2@example.com"
-      # dry: true # dry notification, print the Email HTML in log(STDOUT)
-  # Notify to AWS Simple Notification Service
-  aws_sns:
-    - name: AWS SNS
-      region: us-west-2 # AWS Region
-      arn: arn:aws:sns:us-west-2:298305261856:xxxxx # SNS ARN
-      endpoint: https://sns.us-west-2.amazonaws.com # SNS Endpoint
-      credential: # AWS Access Credential
-        id: AWSXXXXXXXID  # AWS Access Key ID
-        key: XXXXXXXX/YYYYYYY # AWS Access Key Secret
-  # Notify to a local log file
-  log:
-    - name: "Local Log"
-      file: "/tmp/easeprobe.log"
-      dry: true
-```
-
-**Notes**: All of the notifications can have the following optional configuration.
-
-```YAML
-  dry: true # dry notification, print the Discord JSON in log(STDOUT)
-  timeout: 20s # the timeout send out notification, default: 30s
-  retry: # somehow the network is not good needs to retry.
-    times: 3 # default: 3
-    interval: 10s # default: 5s
-```
-
-
-### 3.6 Global Setting Configuration
-
-```YAML
-# Global settings for all probes and notifiers.
-settings:
-  # SLA Report schedule
-  sla:
-    #  daily, weekly (Sunday), monthly (Last Day), none
-    schedule : "daily"
-    # UTC time, the format is 'hour:min:sec'
-    time: "23:59"
-    # debug mode
-    # - true: send the SLA report every minute
-    # - false: send the SLA report in schedule
-    debug: false
-
-  notify:
-    # dry: true # Global settings for dry run
-    retry: # Global settings for retry
-      times: 5
-      interval: 10s
-
-  probe:
-    timeout: 30s # the time out for all probes
-    interval: 1m # probe every minute for all probes
-  # easeprobe program running log file.
-  logfile: "test.log"
-
-  # Log Level Configuration
-  # can be: panic, fatal, error, warn, info, debug.
-  loglevel: "debug"
-
-  # Date format
-  # Date
-  #  - January 2, 2006
-  #  - 01/02/06
-  #  - Jan-02-06
-  #
-  # Time
-  #   - 15:04:05
-  #   - 3:04:05 PM
-  #
-  # Date Time
-  #   - Jan _2 15:04:05                   (Timestamp)
-  #   - Jan _2 15:04:05.000000            (with microseconds)
-  #   - 2006-01-02T15:04:05-0700          (ISO 8601 (RFC 3339))
-  #   - 2006-01-02 15:04:05
-  #   - 02 Jan 06 15:04 MST               (RFC 822)
-  #   - 02 Jan 06 15:04 -0700             (with numeric zone)
-  #   - Mon, 02 Jan 2006 15:04:05 MST     (RFC 1123)
-  #   - Mon, 02 Jan 2006 15:04:05 -0700   (with numeric zone)
-  timeformat: "2006-01-02 15:04:05 UTC"
-
-```
-
-## 4. Community
-
-- [Join Slack Workspace](https://join.slack.com/t/openmegaease/shared_invite/zt-upo7v306-lYPHvVwKnvwlqR0Zl2vveA) for requirement, issue and development.
+- Join Slack [Workspace](https://join.slack.com/t/openmegaease/shared_invite/zt-upo7v306-lYPHvVwKnvwlqR0Zl2vveA) for requirements, issues, and development.
 - [MegaEase on Twitter](https://twitter.com/megaease)
 
-## 5. License
+# 8. License
 
 EaseProbe is under the Apache 2.0 license. See the [LICENSE](./LICENSE) file for details.

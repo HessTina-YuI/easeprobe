@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+// Package shell is the shell probe package
 package shell
 
 import (
@@ -22,144 +23,105 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
-	"time"
 
 	"github.com/megaease/easeprobe/global"
 	"github.com/megaease/easeprobe/probe"
+	"github.com/megaease/easeprobe/probe/base"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 )
 
-// Kind is the type of probe
-const Kind string = "shell"
-
 // Shell implements a config for shell command (os.Exec)
 type Shell struct {
-	Name       string   `yaml:"name"`
-	Command    string   `yaml:"cmd"`
-	Args       []string `yaml:"args,omitempty"`
-	Env        []string `yaml:"env,omitempty"`
-	Contain    string   `yaml:"contain,omitempty"`
-	NotContain string   `yaml:"not_contain,omitempty"`
+	base.DefaultProbe `yaml:",inline"`
+	Command           string   `yaml:"cmd" json:"cmd" jsonschema:"required,title=Command Line,description=Command Line"`
+	Args              []string `yaml:"args,omitempty" json:"args,omitempty" jsonschema:"title=Command Line Arguments,description=Command Line Arguments"`
+	Env               []string `yaml:"env,omitempty" json:"env,omitempty" jsonschema:"title=Environment Variables,description=Environment Variables,example=[\"PATH=/usr/local/bin\"]"`
+	CleanEnv          bool     `yaml:"clean_env,omitempty" json:"clean_env,omitempty" jsonschema:"title=Clean Environment,description=set it to true to keep the environment variables of the current process"`
 
-	//Control Options
-	Timeout      time.Duration `yaml:"timeout,omitempty"`
-	TimeInterval time.Duration `yaml:"interval,omitempty"`
+	// Output Text Checker
+	probe.TextChecker `yaml:",inline"`
 
-	result *probe.Result `yaml:"-"`
-}
+	exitCode  int `yaml:"-" json:"-"`
+	outputLen int `yaml:"-" json:"-"`
 
-// Kind return the Shell kind
-func (s *Shell) Kind() string {
-	return Kind
-}
-
-// Interval get the interval
-func (s *Shell) Interval() time.Duration {
-	return s.TimeInterval
-}
-
-// Result get the probe result
-func (s *Shell) Result() *probe.Result {
-	return s.result
+	metrics *metrics `yaml:"-" json:"-"`
 }
 
 // Config Shell Config Object
 func (s *Shell) Config(gConf global.ProbeSettings) error {
+	kind := "shell"
+	tag := ""
+	name := s.ProbeName
+	s.DefaultProbe.Config(gConf, kind, tag, name,
+		global.CommandLine(s.Command, s.Args), s.DoProbe)
 
-	s.Timeout = gConf.NormalizeTimeOut(s.Timeout)
-	s.TimeInterval = gConf.NormalizeInterval(s.TimeInterval)
+	if err := s.TextChecker.Config(); err != nil {
+		return err
+	}
 
-	s.result = probe.NewResult()
-	s.result.Name = s.Name
-	s.result.Endpoint = s.CommandLine()
-	s.result.PreStatus = probe.StatusInit
-	s.result.TimeFormat = gConf.TimeFormat
+	s.metrics = newMetrics(kind, tag)
 
-	log.Debugf("[%s] configuration: %+v, %+v", s.Kind(), s, s.Result())
+	log.Debugf("[%s / %s] configuration: %+v", s.ProbeKind, s.ProbeName, *s)
 	return nil
 }
 
-// Probe return the checking result
-func (s *Shell) Probe() probe.Result {
+// DoProbe return the checking result
+func (s *Shell) DoProbe() (bool, string) {
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), s.ProbeTimeout)
 	defer cancel()
 
-	for _, e := range s.Env {
-		v := strings.Split(e, "=")
-		os.Setenv(v[0], v[1])
-	}
-
-	now := time.Now()
-	s.result.StartTime = now
-	s.result.StartTimestamp = now.UnixMilli()
-
 	cmd := exec.CommandContext(ctx, s.Command, s.Args...)
+	if s.CleanEnv == false {
+		cmd.Env = append(os.Environ(), s.Env...)
+	} else {
+		log.Infof("[%s / %s] clean the environment variables", s.ProbeKind, s.ProbeName)
+		cmd.Env = s.Env
+	}
 	output, err := cmd.CombinedOutput()
 
-	s.result.RoundTripTime.Duration = time.Since(now)
+	status := true
+	message := "Shell Command has been Run Successfully!"
 
-	outputFmt := func(output []byte) string {
-		s := string(output)
-		if len(strings.TrimSpace(s)) <= 0 {
-			return "empty"
-		}
-		return s
-	}
-
-	status := probe.StatusUp
-	s.result.Message = "Shell Command has been Run Successfully!"
-
+	s.exitCode = 0
+	s.outputLen = len(output)
 	if err != nil {
-		exitCode := 0
 		if exitError, ok := err.(*exec.ExitError); ok {
-			exitCode = exitError.ExitCode()
+			s.exitCode = exitError.ExitCode()
+			message = fmt.Sprintf("Error: %v, ExitCode(%d), Output:%s",
+				err, s.exitCode, probe.CheckEmpty(string(output)))
+		} else {
+			message = fmt.Sprintf("Error: %v, ExitCode(null), Output:%s",
+				err, probe.CheckEmpty(string(output)))
 		}
-
-		s.result.Message = fmt.Sprintf("Error: %v, ExitCode(%d), Output:%s", err, exitCode, outputFmt(output))
-		log.Errorf(s.result.Message)
-		status = probe.StatusDown
+		log.Errorf("[%s / %s] - %s", s.ProbeKind, s.ProbeName, message)
+		status = false
 	}
-	log.Debugf("[%s] - %s", s.Kind(), s.CommandLine())
-	log.Debugf("[%s] - %s", s.Kind(), outputFmt(output))
+	log.Debugf("[%s / %s] - %s", s.ProbeKind, s.ProbeName, global.CommandLine(s.Command, s.Args))
+	log.Debugf("[%s / %s] - %s", s.ProbeKind, s.ProbeName, probe.CheckEmpty(string(output)))
 
-	if err := s.CheckOutput(output); err != nil {
-		log.Errorf("[%s] - %v", s.Kind(), err)
-		s.result.Message = fmt.Sprintf("Error: %v", err)
-		status = probe.StatusDown
+	s.ExportMetrics()
+
+	log.Debugf("[%s / %s] - %s", s.ProbeKind, s.ProbeName, s.TextChecker.String())
+	if err := s.Check(string(output)); err != nil {
+		log.Errorf("[%s / %s] - %v", s.ProbeKind, s.ProbeName, err)
+		message = fmt.Sprintf("Error: %v", err)
+		status = false
 	}
 
-	s.result.PreStatus = s.result.Status
-	s.result.Status = status
-
-	s.result.DoStat(s.TimeInterval)
-	return *s.result
+	return status, message
 }
 
-// CheckOutput checks the output text,
-// - if it contains a configured string then return nil
-// - if it does not contain a configured string then return nil
-func (s *Shell) CheckOutput(output []byte) error {
+// ExportMetrics export shell metrics
+func (s *Shell) ExportMetrics() {
+	s.metrics.ExitCode.With(prometheus.Labels{
+		"name": s.ProbeName,
+		"exit": fmt.Sprintf("%d", s.exitCode),
+	}).Inc()
 
-	str := string(output)
-	if len(s.Contain) > 0 && !strings.Contains(str, s.Contain) {
-
-		return fmt.Errorf("the output does not contain [%s]", s.Contain)
-	}
-
-	if len(s.NotContain) > 0 && strings.Contains(str, s.NotContain) {
-		return fmt.Errorf("the output contains [%s]", s.NotContain)
-
-	}
-	return nil
-}
-
-// CommandLine will return the whole command line which includes command and all arguments
-func (s *Shell) CommandLine() string {
-	result := s.Command
-	for _, arg := range s.Args {
-		result += " " + arg
-	}
-	return result
+	s.metrics.OutputLen.With(prometheus.Labels{
+		"name": s.ProbeName,
+		"exit": fmt.Sprintf("%d", s.exitCode),
+	}).Set(float64(s.outputLen))
 }

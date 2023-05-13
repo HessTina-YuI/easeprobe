@@ -9,7 +9,10 @@ MKFILE_DIR := $(dir $(MKFILE_PATH))
 RELEASE_DIR := ${MKFILE_DIR}/build/bin
 
 # Version
-RELEASE?=v0.1.0
+RELEASE_VER := $(shell git tag --list --sort=-creatordate  "v*" | head -n 1 )
+
+# Go MOD
+GO_MOD := $(shell go list -m)
 
 # Git Related
 GIT_REPO_INFO=$(shell cd ${MKFILE_DIR} && git config --get remote.origin.url)
@@ -27,15 +30,15 @@ all: ${TARGET}
 ${TARGET}: ${SOURCE}
 	mkdir -p ${RELEASE_DIR}
 	go mod tidy
-	go build -gcflags=-G=3 -o ${TARGET} ${MKFILE_DIR}cmd/easeprobe
+	CGO_ENABLED=0 go build -a -ldflags "-s -w -extldflags -static -X ${GO_MOD}/global.Ver=${RELEASE_VER}" -o ${TARGET} ${GO_MOD}/cmd/easeprobe
 
 build: all
 
 test:
-	go test -race -count=1 ./...
+	go test -gcflags=-l -cover -race ${TEST_FLAGS} -v ./...
 
 docker:
-	sudo docker build -t megaease/easeprobe -f ${MKFILE_DIR}/resources/Dockerfile ${MKFILE_DIR}
+	sudo DOCKER_BUILDKIT=1 docker build -t megaease/easeprobe -f ${MKFILE_DIR}/resources/Dockerfile ${MKFILE_DIR}
 
 clean:
 	@rm -rf ${MKFILE_DIR}/build
